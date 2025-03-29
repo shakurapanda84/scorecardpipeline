@@ -166,3 +166,5 @@ test*
 *.png
 examples/model_report/*.png
 examples/scorecard_samples_360.ipynb
+*csv
+data/scorecard_toad/loan.csv
