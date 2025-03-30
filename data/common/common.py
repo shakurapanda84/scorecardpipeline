@@ -76,14 +76,15 @@ def display_df(df,
     # Format floating point numbers
     styler.format(precision=precision)
 
+    # Hide index if specified
     if not index:
-        styler = styler.hide_index()
+        styler = styler.hide(axis='index')
     
     # Format percentage columns
     if percentage_cols:
         for col in percentage_cols:
             if col in df_display.columns:
-                styler.format({col: f'{{:.{percentage_precision}%}}'})
+                styler.format({col: f'{{:.{percentage_precision}f}}%'})
     
     # Apply header styles
     if headers_style:
