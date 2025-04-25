@@ -27,8 +27,7 @@ def _apply_expr_on_array(expr, X, feature_names):
 
 
 class RuleState(str, Enum):
-    INITIALIZED = "initialized"
-    APPLIED = "applied"
+    INITIALIZED = "initialized"    APPLIED = "applied"
 
 
 class RuleStateError(RuntimeError):

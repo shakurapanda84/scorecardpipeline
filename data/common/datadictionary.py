@@ -1,7 +1,8 @@
 import pandas as pd
+import numpy as np
 
 class DataDictionary:
-    def __init__(self, excel_file_path):
+    def __init__(self, default_dictionary_location=None):
         """
         Initialize the DataDictionary with the path to the Excel file.
 
@@ -10,11 +11,12 @@ class DataDictionary:
         excel_file_path : str
             Path to the Excel file containing the data dictionary.
         """
-        self.excel_file_path = excel_file_path
+
         self.data_dict = None
         self.generated_dictionary = None
+        self.default_dictionary_location = default_dictionary_location
 
-    def load_data_dictionary(self, sheet_name=0):
+    def load_data_dictionary(self, excel_file_path, sheet_name=0):
         """
         Load the data dictionary from the Excel file.
 
@@ -23,6 +25,7 @@ class DataDictionary:
         sheet_name : str or int, default 0
             Name or index of the sheet to read from the Excel file.
         """
+        self.excel_file_path = excel_file_path
         try:
             self.data_dict = pd.read_excel(self.excel_file_path, sheet_name=sheet_name)
             print("Data dictionary loaded successfully.")
@@ -93,7 +96,7 @@ class DataDictionary:
         # Prepare the DataFrame structure
         variables = input_df.columns.difference(exclude_columns or [])
         result_df = pd.DataFrame(variables, columns=['Variable'])
-
+  
         # Join with self.data_dict to get descriptions if available
         if self.data_dict is not None:
             result_df = result_df.merge(self.data_dict, on='Variable', how='left')
@@ -108,6 +111,11 @@ class DataDictionary:
         result_df['Remove Reason'] = ""
 
         self.generated_dictionary = result_df
+       
+        self.append_column_types(input_df)
+        self.append_null_statistics(input_df)
+        self.append_additional_statistics(input_df)
+        
 
     def update_removal_status(self, variables_to_remove, reason):
         """
@@ -181,45 +189,72 @@ class DataDictionary:
     def append_additional_statistics(self, input_df):
         """
         Append cardinality, freqmax, concentration, mode, max, min, mean, std, and percentiles to the generated dictionary.
-
-        Parameters:
-        -----------
-        input_df : pandas DataFrame
-            The input DataFrame to analyze.
-
-        Modifies:
-        ---------
-        Updates the generated_dictionary with additional statistics.
         """
         if self.generated_dictionary is None:
             print("Generated dictionary is not available.")
             return
 
+        # Identify numeric variables
+        numeric_vars = input_df.select_dtypes(include=np.number).columns
+        numeric_mask = self.generated_dictionary['Variable'].isin(numeric_vars)
+        
         # Calculate additional statistics
         cardinality = input_df.nunique()
         mode = input_df.mode().iloc[0]
         freqmax = input_df.apply(lambda x: x.value_counts().max())
         concentration = (freqmax / len(input_df)) * 100
-        max_values = input_df.max()
-        min_values = input_df.min()
-        mean_values = input_df.mean()
-        std_values = input_df.std()
-        percentiles_25 = input_df.quantile(0.25)
-        percentiles_50 = input_df.quantile(0.50)
-        percentiles_75 = input_df.quantile(0.75)
+        
+        # Initialize numeric stats with NaN
+        max_values = pd.Series(np.nan, index=input_df.columns)
+        min_values = pd.Series(np.nan, index=input_df.columns)
+        mean_values = pd.Series(np.nan, index=input_df.columns)
+        std_values = pd.Series(np.nan, index=input_df.columns)
+        percentiles_25 = pd.Series(np.nan, index=input_df.columns)
+        percentiles_50 = pd.Series(np.nan, index=input_df.columns)
+        percentiles_75 = pd.Series(np.nan, index=input_df.columns)
+        
+        # Calculate only for numeric variables
+        max_values[numeric_vars] = input_df[numeric_vars].max()
+        min_values[numeric_vars] = input_df[numeric_vars].min()
+        mean_values[numeric_vars] = input_df[numeric_vars].mean()
+        std_values[numeric_vars] = input_df[numeric_vars].std()
+        percentiles_25[numeric_vars] = input_df[numeric_vars].quantile(0.25)
+        percentiles_50[numeric_vars] = input_df[numeric_vars].quantile(0.50)
+        percentiles_75[numeric_vars] = input_df[numeric_vars].quantile(0.75)
 
         # Append statistics to the generated dictionary
         self.generated_dictionary['Cardinality'] = self.generated_dictionary['Variable'].map(cardinality)
         self.generated_dictionary['Mode'] = self.generated_dictionary['Variable'].map(mode)
         self.generated_dictionary['FreqMax'] = self.generated_dictionary['Variable'].map(freqmax)
         self.generated_dictionary['Concentration'] = self.generated_dictionary['Variable'].map(concentration)
-        self.generated_dictionary['Max'] = self.generated_dictionary['Variable'].map(max_values)
-        self.generated_dictionary['Min'] = self.generated_dictionary['Variable'].map(min_values)
-        self.generated_dictionary['Mean'] = self.generated_dictionary['Variable'].map(mean_values)
-        self.generated_dictionary['Std'] = self.generated_dictionary['Variable'].map(std_values)
-        self.generated_dictionary['25%'] = self.generated_dictionary['Variable'].map(percentiles_25)
-        self.generated_dictionary['50%'] = self.generated_dictionary['Variable'].map(percentiles_50)
-        self.generated_dictionary['75%'] = self.generated_dictionary['Variable'].map(percentiles_75)
+        
+        # Only map numeric stats for numeric variables
+        self.generated_dictionary.loc[numeric_mask, 'Max'] = self.generated_dictionary.loc[numeric_mask, 'Variable'].map(max_values)
+        self.generated_dictionary.loc[numeric_mask, 'Min'] = self.generated_dictionary.loc[numeric_mask, 'Variable'].map(min_values)
+        self.generated_dictionary.loc[numeric_mask, 'Mean'] = self.generated_dictionary.loc[numeric_mask, 'Variable'].map(mean_values)
+        self.generated_dictionary.loc[numeric_mask, 'Std'] = self.generated_dictionary.loc[numeric_mask, 'Variable'].map(std_values)
+        self.generated_dictionary.loc[numeric_mask, '25%'] = self.generated_dictionary.loc[numeric_mask, 'Variable'].map(percentiles_25)
+        self.generated_dictionary.loc[numeric_mask, '50%'] = self.generated_dictionary.loc[numeric_mask, 'Variable'].map(percentiles_50)
+        self.generated_dictionary.loc[numeric_mask, '75%'] = self.generated_dictionary.loc[numeric_mask, 'Variable'].map(percentiles_75)
+
+        # Add unique values for categorical types
+        self.generated_dictionary['Unique Values'] = np.nan
+        cat_mask = self.generated_dictionary['Type'].isin(['Discrete', 'Nominal'])
+
+        for var in self.generated_dictionary.loc[cat_mask, 'Variable']:
+            unique_vals = input_df[var].dropna().unique()
+            if len(unique_vals) == 0:
+                displayed = 'All NaN'
+            else:
+                unique_vals = sorted(unique_vals, key=lambda x: str(x))
+                if len(unique_vals) > 20:
+                    displayed = ', '.join(map(str, unique_vals[:20])) + ', ...'
+                else:
+                    displayed = ', '.join(map(str, unique_vals))
+                    
+            self.generated_dictionary.loc[
+                self.generated_dictionary['Variable'] == var, 'Unique Values'
+            ] = displayed
 
     @staticmethod
     def detect_type(series):
@@ -242,3 +277,66 @@ class DataDictionary:
                 return 'Ratio'
         else:
             return 'Nominal'
+
+    def save_generated_dictionary(self, output_path = None, sheet_name='Data Dictionary'):
+        """
+        Save the generated data dictionary to an Excel file with formatted headers
+        
+        Parameters:
+        -----------
+        output_path : str
+            Path to save the Excel file
+        sheet_name : str, default 'Data Dictionary'
+            Name of the worksheet
+        """
+        if self.generated_dictionary is None:
+            raise ValueError("No generated dictionary available. Run generate_dataframe() first.")
+        
+        if output_path is None:
+            output_path = self.default_dictionary_location + "/" +"data_dictionary.xlsx"
+
+        try:
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                # Convert DataFrame to Excel
+                self.generated_dictionary.to_excel(
+                    writer,
+                    sheet_name=sheet_name,
+                    index=False,
+                    startrow=1,
+                    header=False
+                )
+                
+                # Get workbook objects
+                workbook = writer.book
+                worksheet = writer.sheets[sheet_name]
+                
+                # Define header format
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#4472C4',  # Blue background
+                    'font_color': 'white',   # White text
+                    'border': 1
+                })
+                
+                # Write column headers with format
+                for col_num, value in enumerate(self.generated_dictionary.columns.values):
+                    worksheet.write(0, col_num, value, header_format)
+                
+                # Add autofilter
+                worksheet.autofilter(0, 0, 0, len(self.generated_dictionary.columns)-1)
+                
+                # Set column widths
+                for idx, col in enumerate(self.generated_dictionary.columns):
+                    max_len = max((
+                        self.generated_dictionary[col].astype(str).map(len).max(),
+                        len(col)
+                    )) + 2
+                    worksheet.set_column(idx, idx, max_len)
+                    
+                print(f"Data dictionary saved successfully to {output_path}")
+                
+        except Exception as e:
+            print(f"Error saving data dictionary: {e}")
+            raise
