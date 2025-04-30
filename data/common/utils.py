@@ -956,3 +956,33 @@ def tasks_executor(tasks, n_jobs=-1, pool="thread"):
     wait(_tasks, return_when=ALL_COMPLETED)
 
     return [t.result() for t in _tasks]
+
+
+def count_values_in_columns(dataframe, columns, values):
+    """
+    Check if specified columns in a DataFrame contain any of the listed values.
+
+    Parameters:
+    -----------
+    dataframe : pd.DataFrame
+        The DataFrame to check.
+    columns : list
+        List of column names to check in the DataFrame.
+    values : list
+        List of values to count in each column.
+
+    Returns:
+    --------
+    pd.DataFrame
+        A DataFrame with columns as index, values as columns, and counts as entries.
+    """
+    # Initialize a result DataFrame
+    result = pd.DataFrame(index=columns, columns=values).fillna(0)
+
+    # Count occurrences of each value in each specified column
+    for col in columns:
+        if col in dataframe.columns:
+            counts = dataframe[col].apply(lambda x: pd.Series([x == v for v in values])).sum()
+            result.loc[col] = counts
+
+    return result
