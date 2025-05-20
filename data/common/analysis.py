@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import io
 from openpyxl import ExcelWriter
+from openpyxl import Workbook
+from openpyxl.drawing.image import Image
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 class Analysis:
     def __init__(self, data: pd.DataFrame):
@@ -161,44 +164,59 @@ def analyze_and_export_to_excel(df, columns, excel_file_path):
     --------
     None
     """
-    with ExcelWriter(excel_file_path, engine='xlsxwriter') as writer:
-        for column_name in columns:
-            # Perform analysis
-            combined_df = analyze_categorical_bads(df, column_name)
+    # Create a new workbook
+    wb = Workbook()
+    wb.remove(wb.active)  # Remove the default sheet
 
-            # Write DataFrame to Excel
-            combined_df.to_excel(writer, sheet_name=column_name, index=False)
+    for column_name in columns:
+        # Perform analysis
+        combined_df = analyze_categorical_bads(df, column_name)
 
-            # Plot and save the figure to the Excel file
-            for source in ['all', 'booked', 'unbooked']:
-                plot_data = combined_df[combined_df['source'] == source]
-                fig, ax1 = plt.subplots(figsize=(12, 6))
+        # Add a new sheet for each column
+        ws = wb.create_sheet(title=column_name)
 
-                # Plot bad count
-                sns.barplot(x=column_name, y='bad_count', data=plot_data, ax=ax1, color='b', ci=None)
-                ax1.set_title(f'Grouped Bad Counts and Mean Bad Rate by {column_name} ({source})')
-                ax1.set_xlabel(column_name)
-                ax1.set_ylabel('Bad Count', color='b')
-                ax1.tick_params(axis='y', labelcolor='b')
+        # Write DataFrame to Excel
+        for r_idx, row in enumerate(dataframe_to_rows(combined_df, index=False, header=True), 1):
+            for c_idx, value in enumerate(row, 1):
+                ws.cell(row=r_idx, column=c_idx, value=value)
 
-                # Create a second y-axis for the mean bad rate
-                ax2 = ax1.twinx()
-                sns.lineplot(x=column_name, y='bad_percentage', data=plot_data, ax=ax2, color='r', marker='o')
-                ax2.set_ylabel('Bad Percentage', color='r')
-                ax2.tick_params(axis='y', labelcolor='r')
+        # Plot and save the figure to the Excel file
+        row_offset = len(combined_df) + 2  # Start plotting after the data
+        for source in ['all', 'booked', 'unbooked']:
+            plot_data = combined_df[combined_df['source'] == source]
+            fig, ax1 = plt.subplots(figsize=(12, 6))
 
-                plt.xticks(rotation=45)
-                plt.tight_layout()
+            # Plot bad count
+            sns.barplot(x=column_name, y='bad_count', data=plot_data, ax=ax1, color='b', ci=None)
+            ax1.set_title(f'Grouped Bad Counts and Mean Bad Rate by {column_name} ({source})')
+            ax1.set_xlabel(column_name)
+            ax1.set_ylabel('Bad Count', color='b')
+            ax1.tick_params(axis='y', labelcolor='b')
 
-                # Save the plot to a BytesIO object
-                image_stream = io.BytesIO()
-                plt.savefig(image_stream, format='png')
-                plt.close(fig)
+            # Create a second y-axis for the mean bad rate
+            ax2 = ax1.twinx()
+            sns.lineplot(x=column_name, y='bad_percentage', data=plot_data, ax=ax2, color='r', marker='o')
+            ax2.set_ylabel('Bad Percentage', color='r')
+            ax2.tick_params(axis='y', labelcolor='r')
 
-                # Insert the image into the Excel sheet
-                worksheet = writer.sheets[column_name]
-                worksheet.insert_image('G2', '', {'image_data': image_stream})
+            plt.xticks(rotation=45)
+            plt.tight_layout()
 
+            # Save the plot to a BytesIO object
+            image_stream = io.BytesIO()
+            plt.savefig(image_stream, format='png')
+            plt.close(fig)
+
+            # Insert the image into the Excel sheet
+            image_stream.seek(0)
+            img = Image(image_stream)
+            img.anchor = f'G{row_offset}'  # Position the image
+            ws.add_image(img)
+
+            row_offset += 20  # Adjust the row offset for the next plot
+
+    # Save the workbook
+    wb.save(excel_file_path)
     print(f"Analysis results have been written to {excel_file_path}")
 
 # Example usage
