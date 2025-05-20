@@ -3,27 +3,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 class Scorecard:
-    def __init__(self, pdo, base_odds, min_score, max_score):
+    def __init__(self, base_score=600, pdo=20):
         """
-        Initialize the Scorecard with the given parameters.
+        Initialize the Scorecard with base score and points to double odds (PDO).
 
         Parameters:
         -----------
+        base_score : int
+            The base score for the scorecard.
         pdo : int
-            Points to Double Odds.
-        base_odds : float
-            Base odds for the scorecard.
-        min_score : int
-            Minimum score for the scorecard.
-        max_score : int
-            Maximum score for the scorecard.
+            Points to Double Odds, which defines how much the score changes when the odds double.
         """
+        self.base_score = base_score
         self.pdo = pdo
-        self.base_odds = base_odds
-        self.min_score = min_score
-        self.max_score = max_score
         self.factor = self.pdo / np.log(2)
-        self.offset = self.min_score - self.factor * np.log(self.base_odds)
+        self.offset = self.base_score
 
     def createScorecard(self, probabilities):
         """
@@ -45,6 +39,29 @@ class Scorecard:
             scores.append(score)
         return scores
 
+    def calculate_score_for_woe(self, woe_values, coefficients):
+        """
+        Calculate the score for each WOE bin using logistic regression coefficients.
+
+        Parameters:
+        -----------
+        woe_values : list or np.array
+            List or array of WOE values for each bin.
+        coefficients : list or np.array
+            List or array of logistic regression coefficients for each feature.
+
+        Returns:
+        --------
+        np.array
+            Array of scores corresponding to each WOE bin.
+        """
+        # Ensure woe_values and coefficients are numpy arrays
+        woe_values = np.array(woe_values)
+        coefficients = np.array(coefficients)
+
+        # Calculate the score for each WOE bin
+        scores = self.offset + self.factor * (coefficients * woe_values)
+        return scores
 
     def score_breakdown(df, score_col, bad_col='bad', pdo=20):
         """
@@ -159,8 +176,8 @@ def plot_bad_ratio(breakdown_df, figsize=(12, 6)):
 
 
 if __name__ == "__main__":
-    # Initialize the Scorecard
-    scorecard = Scorecard(pdo=30, base_odds=1, min_score=200, max_score=800)
+    # Initialize Scorecard
+    scorecard = Scorecard(base_score=600, pdo=20)
 
     # Example probabilities
     probabilities = [0.1, 0.2, 0.5, 0.7, 0.9]
@@ -170,4 +187,12 @@ if __name__ == "__main__":
 
     # Display the results
     for prob, score in zip(probabilities, scores):
-        print(f"Probability: {prob:.2f}, Score: {score:.2f}") 
+        print(f"Probability: {prob:.2f}, Score: {score:.2f}")
+
+    # Example WOE values and coefficients
+    woe_values = [-0.5, 0.0, 0.5, 1.0]
+    coefficients = [0.2, 0.3, 0.4, 0.5]
+
+    # Calculate scores for WOE bins
+    scores = scorecard.calculate_score_for_woe(woe_values, coefficients)
+    print("Scores for WOE bins:", scores) 
