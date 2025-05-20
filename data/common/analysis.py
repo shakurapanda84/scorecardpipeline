@@ -2,6 +2,10 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Union
+import matplotlib.pyplot as plt
+import seaborn as sns
+import io
+from openpyxl import ExcelWriter
 
 class Analysis:
     def __init__(self, data: pd.DataFrame):
@@ -74,24 +78,141 @@ class Analysis:
         
         return roll_matrix
 
+def analyze_categorical_bads(df, column_name):
+    """
+    Analyze a categorical column in a DataFrame to produce grouped statistics and visualizations.
+
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        The input DataFrame containing the data.
+    column_name : str
+        The name of the categorical column to analyze.
+
+    Returns:
+    --------
+    pd.DataFrame
+        A combined DataFrame containing the grouped statistics.
+    """
+    # Ensure the 'bad' column exists
+    if 'bad' not in df.columns:
+        raise ValueError("The DataFrame must contain a 'bad' column.")
+
+    # Ensure the 'source' column exists
+    if 'source' not in df.columns:
+        raise ValueError("The DataFrame must contain a 'source' column.")
+
+    # 1. Grouped count of bads by column value
+    grouped_by_value = df.groupby(column_name).agg(
+        bad_count=('bad', 'sum'),
+        total_count=('bad', 'count')
+    ).reset_index()
+    grouped_by_value['bad_percentage'] = (grouped_by_value['bad_count'] / grouped_by_value['total_count']) * 100
+    grouped_by_value['source'] = 'all'  # Add source column with 'all'
+
+    # 2. Grouped count of bads by column value and source
+    grouped_by_value_source = df.groupby([column_name, 'source']).agg(
+        bad_count=('bad', 'sum'),
+        total_count=('bad', 'count')
+    ).reset_index()
+    grouped_by_value_source['bad_percentage'] = (grouped_by_value_source['bad_count'] / grouped_by_value_source['total_count']) * 100
+
+    # Combine the two DataFrames
+    combined_df = pd.concat([grouped_by_value, grouped_by_value_source], ignore_index=True)
+
+    # 3. Plot bar charts for each group
+    for source in ['all', 'booked', 'unbooked']:
+        plot_data = combined_df[combined_df['source'] == source]
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+
+        # Plot bad count
+        sns.barplot(x=column_name, y='bad_count', data=plot_data, ax=ax1, color='b', ci=None)
+        ax1.set_title(f'Grouped Bad Counts and Mean Bad Rate by {column_name} ({source})')
+        ax1.set_xlabel(column_name)
+        ax1.set_ylabel('Bad Count', color='b')
+        ax1.tick_params(axis='y', labelcolor='b')
+
+        # Create a second y-axis for the mean bad rate
+        ax2 = ax1.twinx()
+        sns.lineplot(x=column_name, y='bad_percentage', data=plot_data, ax=ax2, color='r', marker='o')
+        ax2.set_ylabel('Bad Percentage', color='r')
+        ax2.tick_params(axis='y', labelcolor='r')
+
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+
+    return combined_df
+
+def analyze_and_export_to_excel(df, columns, excel_file_path):
+    """
+    Analyze a list of categorical columns in a DataFrame and export results to an Excel file.
+
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        The input DataFrame containing the data.
+    columns : list of str
+        The list of categorical column names to analyze.
+    excel_file_path : str
+        The file path for the output Excel file.
+
+    Returns:
+    --------
+    None
+    """
+    with ExcelWriter(excel_file_path, engine='xlsxwriter') as writer:
+        for column_name in columns:
+            # Perform analysis
+            combined_df = analyze_categorical_bads(df, column_name)
+
+            # Write DataFrame to Excel
+            combined_df.to_excel(writer, sheet_name=column_name, index=False)
+
+            # Plot and save the figure to the Excel file
+            for source in ['all', 'booked', 'unbooked']:
+                plot_data = combined_df[combined_df['source'] == source]
+                fig, ax1 = plt.subplots(figsize=(12, 6))
+
+                # Plot bad count
+                sns.barplot(x=column_name, y='bad_count', data=plot_data, ax=ax1, color='b', ci=None)
+                ax1.set_title(f'Grouped Bad Counts and Mean Bad Rate by {column_name} ({source})')
+                ax1.set_xlabel(column_name)
+                ax1.set_ylabel('Bad Count', color='b')
+                ax1.tick_params(axis='y', labelcolor='b')
+
+                # Create a second y-axis for the mean bad rate
+                ax2 = ax1.twinx()
+                sns.lineplot(x=column_name, y='bad_percentage', data=plot_data, ax=ax2, color='r', marker='o')
+                ax2.set_ylabel('Bad Percentage', color='r')
+                ax2.tick_params(axis='y', labelcolor='r')
+
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+
+                # Save the plot to a BytesIO object
+                image_stream = io.BytesIO()
+                plt.savefig(image_stream, format='png')
+                plt.close(fig)
+
+                # Insert the image into the Excel sheet
+                worksheet = writer.sheets[column_name]
+                worksheet.insert_image('G2', '', {'image_data': image_stream})
+
+    print(f"Analysis results have been written to {excel_file_path}")
+
 # Example usage
 if __name__ == "__main__":
-    # Generate sample data
-    dates = pd.date_range('2020-01-01', '2021-12-31', freq='M')
-    accounts = pd.DataFrame({
-        'account_id': np.repeat(np.arange(1, 101), len(dates)),
-        'observation_date': np.tile(dates, 100),
-        'delinquency_status': np.random.choice([0, 30, 60, 90, 180], size=100*len(dates))
-    })
-    
-    # Add some progression logic
-    accounts['delinquency_status'] = accounts.groupby('account_id')['delinquency_status'].cummax()
-    
-    # Initialize analysis
-    analyzer = Analysis(accounts)
-    
-    # Perform roll rate analysis
-    roll_rates = analyzer.roll_rate_analysis(period='M', lookback_periods=6)
-    
-    print("Roll Rate Analysis Matrix:")
-    print(roll_rates)
+    # Sample data
+    data = {
+        'category': ['A', 'B', 'A', 'C', 'B', 'A', 'C', 'B'],
+        'bad': [1, 0, 1, 0, 1, 0, 1, 0],
+        'source': ['booked', 'unbooked', 'booked', 'unbooked', 'booked', 'unbooked', 'booked', 'unbooked']
+    }
+    df = pd.DataFrame(data)
+
+    # List of columns to analyze
+    columns_to_analyze = ['category']
+
+    # Analyze and export to Excel
+    analyze_and_export_to_excel(df, columns_to_analyze, 'analysis_results.xlsx')
